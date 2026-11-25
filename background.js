@@ -43,7 +43,6 @@ async function getMatchingYouTubeMusicTabs() {
     }
   }
 
-  // Also check all tabs for pendingUrl transitions (e.g., navigation into music.youtube.com).
   const allTabs = await chrome.tabs.query({});
   if (Array.isArray(allTabs)) {
     for (const tab of allTabs) {
@@ -61,28 +60,42 @@ async function getMatchingYouTubeMusicTabs() {
   return Array.from(matchedById.entries()).map(([id, url]) => ({ id, url }));
 }
 
-function setDisplayWakeLock(shouldHold, matchingTabs) {
+async function syncIndicatorsToTabs(matchingTabs, isActive) {
+  for (const tab of matchingTabs) {
+    try {
+      await chrome.tabs.sendMessage(tab.id, {
+        type: "YTM_WAKE_STATE",
+        active: isActive
+      });
+    } catch {
+      // Content script may not be ready yet if the tab is still spinning up;
+      // tabs.onUpdated with status === "complete" will re-sync.
+    }
+  }
+}
+
+async function setDisplayWakeLock(shouldHold, matchingTabs) {
   if (shouldHold) {
-    if (currentWakeState === "display") {
+    if (currentWakeState !== "display") {
+      chrome.power.requestKeepAwake("display");
+      if (chrome.runtime.lastError) {
+        logEvent("ERROR requesting keep-awake ('display')", chrome.runtime.lastError.message);
+        return;
+      }
+
+      currentWakeState = "display";
+      logEvent("STATE CHANGE -> DISPLAY AWAKE (requested)", {
+        activeTabCount: matchingTabs.length,
+        tabs: matchingTabs
+      });
+    } else {
       logEvent("Keep-awake ('display') already active", {
         activeTabCount: matchingTabs.length
       });
-      return;
     }
 
-    chrome.power.requestKeepAwake("display");
-    if (chrome.runtime.lastError) {
-      logEvent("ERROR requesting keep-awake ('display')", chrome.runtime.lastError.message);
-      return;
-    }
-
-    currentWakeState = "display";
-    logEvent("STATE CHANGE -> DISPLAY AWAKE (requested)", {
-      activeTabCount: matchingTabs.length,
-      tabs: matchingTabs
-    });
+    await syncIndicatorsToTabs(matchingTabs, true);
   } else {
-    // Always invoke releaseKeepAwake() when transitioning to released, or if no tabs match.
     chrome.power.releaseKeepAwake();
     if (chrome.runtime.lastError) {
       logEvent("ERROR releasing keep-awake", chrome.runtime.lastError.message);
@@ -105,7 +118,7 @@ async function evaluateAndApplyState(triggerReason) {
     shouldHold,
     activeTabCount: matchingTabs.length
   });
-  setDisplayWakeLock(shouldHold, matchingTabs);
+  await setDisplayWakeLock(shouldHold, matchingTabs);
 }
 
 function scheduleEvaluation(triggerReason) {
