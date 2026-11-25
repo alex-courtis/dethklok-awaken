@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "YouTube Music Keep Awake",
   "version": "1.2.1",
-  "description": "Prevents display dimming and device sleep on ChromeOS while YouTube Music is open in a browser tab or PWA/app window, with a 40px orange-outlined Nathan Explosion squircle indicator when active.",
+  "description": "Prevents display dimming and device sleep on ChromeOS while YouTube Music or YouTube is open in a browser tab or PWA/app window, with a 40px orange-outlined Nathan Explosion squircle indicator when active.",
   "permissions": [
     "power",
     "tabs"
@@ -14,7 +14,9 @@
     {
       "matches": [
         "https://music.youtube.com/*",
-        "http://music.youtube.com/*"
+        "http://music.youtube.com/*",
+        "https://www.youtube.com/*",
+        "http://www.youtube.com/*"
       ],
       "js": [
         "content.js"
@@ -30,7 +32,9 @@
       ],
       "matches": [
         "https://music.youtube.com/*",
-        "http://music.youtube.com/*"
+        "http://music.youtube.com/*",
+        "https://www.youtube.com/*",
+        "http://www.youtube.com/*"
       ]
     }
   ]

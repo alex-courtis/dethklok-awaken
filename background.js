@@ -1,7 +1,14 @@
-const YTM_URL_PATTERNS = [
+const TARGET_URL_PATTERNS = [
   "https://music.youtube.com/*",
-  "http://music.youtube.com/*"
+  "http://music.youtube.com/*",
+  "https://www.youtube.com/*",
+  "http://www.youtube.com/*"
 ];
+
+const SUPPORTED_HOSTNAMES = new Set([
+  "music.youtube.com",
+  "www.youtube.com"
+]);
 
 // "display" = active wake lock held by this extension; "released" = lock released/inactive.
 let currentWakeState = "released";
@@ -16,7 +23,7 @@ function logEvent(message, details = null) {
   }
 }
 
-function isYouTubeMusicUrl(rawUrl) {
+function isSupportedYouTubeUrl(rawUrl) {
   if (!rawUrl) {
     return false;
   }
@@ -24,20 +31,20 @@ function isYouTubeMusicUrl(rawUrl) {
     const parsed = new URL(rawUrl);
     return (
       (parsed.protocol === "https:" || parsed.protocol === "http:") &&
-      parsed.hostname === "music.youtube.com"
+      SUPPORTED_HOSTNAMES.has(parsed.hostname)
     );
   } catch {
     return false;
   }
 }
 
-async function getMatchingYouTubeMusicTabs() {
+async function getMatchingYouTubeTabs() {
   const matchedById = new Map();
 
-  const patternTabs = await chrome.tabs.query({ url: YTM_URL_PATTERNS });
+  const patternTabs = await chrome.tabs.query({ url: TARGET_URL_PATTERNS });
   if (Array.isArray(patternTabs)) {
     for (const tab of patternTabs) {
-      if (isYouTubeMusicUrl(tab.url) && typeof tab.id === "number") {
+      if (isSupportedYouTubeUrl(tab.url) && typeof tab.id === "number") {
         matchedById.set(tab.id, tab.url);
       }
     }
@@ -46,9 +53,9 @@ async function getMatchingYouTubeMusicTabs() {
   const allTabs = await chrome.tabs.query({});
   if (Array.isArray(allTabs)) {
     for (const tab of allTabs) {
-      const candidateUrl = isYouTubeMusicUrl(tab.url)
+      const candidateUrl = isSupportedYouTubeUrl(tab.url)
         ? tab.url
-        : isYouTubeMusicUrl(tab.pendingUrl)
+        : isSupportedYouTubeUrl(tab.pendingUrl)
           ? tab.pendingUrl
           : null;
       if (candidateUrl && typeof tab.id === "number" && !matchedById.has(tab.id)) {
@@ -106,13 +113,13 @@ async function setDisplayWakeLock(shouldHold, matchingTabs) {
       currentWakeState = "released";
       logEvent("STATE CHANGE -> RELEASED (normal sleep restored)");
     } else {
-      logEvent("Confirmed no YouTube Music tabs open; state is 'released'");
+      logEvent("Confirmed no matching YouTube or YouTube Music tabs open; state is 'released'");
     }
   }
 }
 
 async function evaluateAndApplyState(triggerReason) {
-  const matchingTabs = await getMatchingYouTubeMusicTabs();
+  const matchingTabs = await getMatchingYouTubeTabs();
   const shouldHold = matchingTabs.length > 0;
   logEvent(`Evaluated trigger: ${triggerReason}`, {
     shouldHold,
