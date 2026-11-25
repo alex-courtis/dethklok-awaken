@@ -1,14 +1,9 @@
-const TARGET_URL_PATTERNS = [
-  "https://music.youtube.com/*",
-  "http://music.youtube.com/*",
-  "https://www.youtube.com/*",
-  "http://www.youtube.com/*"
-];
-
-const SUPPORTED_HOSTNAMES = new Set([
+const DEFAULT_HOSTNAMES = [
   "music.youtube.com",
   "www.youtube.com"
-]);
+];
+
+const STORAGE_KEY_CUSTOM_HOSTS = "customHosts";
 
 // "display" = active wake lock held by this extension; "released" = lock released/inactive.
 let currentWakeState = "released";
@@ -23,7 +18,46 @@ function logEvent(message, details = null) {
   }
 }
 
-function isSupportedYouTubeUrl(rawUrl) {
+function normalizeHostname(input) {
+  if (!input || typeof input !== "string") {
+    return null;
+  }
+  const trimmed = input.trim().toLowerCase();
+  if (!trimmed) {
+    return null;
+  }
+  try {
+    const candidate = trimmed.includes("://") ? trimmed : `https://${trimmed}`;
+    const parsed = new URL(candidate);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      return null;
+    }
+    return parsed.hostname || null;
+  } catch {
+    return null;
+  }
+}
+
+async function getConfiguredHostnames() {
+  const hosts = new Set(DEFAULT_HOSTNAMES);
+  try {
+    const stored = await chrome.storage.sync.get({ [STORAGE_KEY_CUSTOM_HOSTS]: [] });
+    const list = Array.isArray(stored[STORAGE_KEY_CUSTOM_HOSTS])
+      ? stored[STORAGE_KEY_CUSTOM_HOSTS]
+      : [];
+    for (const raw of list) {
+      const host = normalizeHostname(raw);
+      if (host) {
+        hosts.add(host);
+      }
+    }
+  } catch (err) {
+    logEvent("ERROR reading custom hosts from storage", String(err));
+  }
+  return hosts;
+}
+
+function isSupportedUrl(rawUrl, allowedHosts) {
   if (!rawUrl) {
     return false;
   }
@@ -31,31 +65,67 @@ function isSupportedYouTubeUrl(rawUrl) {
     const parsed = new URL(rawUrl);
     return (
       (parsed.protocol === "https:" || parsed.protocol === "http:") &&
-      SUPPORTED_HOSTNAMES.has(parsed.hostname)
+      allowedHosts.has(parsed.hostname)
     );
   } catch {
     return false;
   }
 }
 
-async function getMatchingYouTubeTabs() {
-  const matchedById = new Map();
+function hostToOriginPatterns(host) {
+  return [`https://${host}/*`, `http://${host}/*`];
+}
 
-  const patternTabs = await chrome.tabs.query({ url: TARGET_URL_PATTERNS });
-  if (Array.isArray(patternTabs)) {
-    for (const tab of patternTabs) {
-      if (isSupportedYouTubeUrl(tab.url) && typeof tab.id === "number") {
-        matchedById.set(tab.id, tab.url);
+async function ensureContentScriptForTab(tabId) {
+  if (typeof tabId !== "number") {
+    return false;
+  }
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: "YTM_WAKE_PING" });
+    return true;
+  } catch {
+    // Not yet injected; attempt programmatic injection if host permission is granted.
+  }
+
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["content.js"]
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function getMatchingTabs(allowedHosts) {
+  const matchedById = new Map();
+  const patterns = [];
+  for (const host of allowedHosts) {
+    patterns.push(...hostToOriginPatterns(host));
+  }
+
+  if (patterns.length > 0) {
+    try {
+      const patternTabs = await chrome.tabs.query({ url: patterns });
+      if (Array.isArray(patternTabs)) {
+        for (const tab of patternTabs) {
+          if (isSupportedUrl(tab.url, allowedHosts) && typeof tab.id === "number") {
+            matchedById.set(tab.id, tab.url);
+          }
+        }
       }
+    } catch {
+      // Fallback to chrome.tabs.query({}) below if a dynamic pattern is not granted.
     }
   }
 
   const allTabs = await chrome.tabs.query({});
   if (Array.isArray(allTabs)) {
     for (const tab of allTabs) {
-      const candidateUrl = isSupportedYouTubeUrl(tab.url)
+      const candidateUrl = isSupportedUrl(tab.url, allowedHosts)
         ? tab.url
-        : isSupportedYouTubeUrl(tab.pendingUrl)
+        : isSupportedUrl(tab.pendingUrl, allowedHosts)
           ? tab.pendingUrl
           : null;
       if (candidateUrl && typeof tab.id === "number" && !matchedById.has(tab.id)) {
@@ -69,6 +139,9 @@ async function getMatchingYouTubeTabs() {
 
 async function syncIndicatorsToTabs(matchingTabs, isActive) {
   for (const tab of matchingTabs) {
+    if (isActive) {
+      await ensureContentScriptForTab(tab.id);
+    }
     try {
       await chrome.tabs.sendMessage(tab.id, {
         type: "YTM_WAKE_STATE",
@@ -113,17 +186,19 @@ async function setDisplayWakeLock(shouldHold, matchingTabs) {
       currentWakeState = "released";
       logEvent("STATE CHANGE -> RELEASED (normal sleep restored)");
     } else {
-      logEvent("Confirmed no matching YouTube or YouTube Music tabs open; state is 'released'");
+      logEvent("Confirmed no matching tabs open; state is 'released'");
     }
   }
 }
 
 async function evaluateAndApplyState(triggerReason) {
-  const matchingTabs = await getMatchingYouTubeTabs();
+  const allowedHosts = await getConfiguredHostnames();
+  const matchingTabs = await getMatchingTabs(allowedHosts);
   const shouldHold = matchingTabs.length > 0;
   logEvent(`Evaluated trigger: ${triggerReason}`, {
     shouldHold,
-    activeTabCount: matchingTabs.length
+    activeTabCount: matchingTabs.length,
+    hosts: Array.from(allowedHosts)
   });
   await setDisplayWakeLock(shouldHold, matchingTabs);
 }
@@ -146,6 +221,20 @@ chrome.runtime.onInstalled.addListener((details) => {
 
 chrome.runtime.onStartup.addListener(() => {
   void scheduleEvaluation("runtime.onStartup");
+});
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === "sync" && changes[STORAGE_KEY_CUSTOM_HOSTS]) {
+    void scheduleEvaluation("storage.onChanged (customHosts)");
+  }
+});
+
+chrome.permissions.onAdded.addListener(() => {
+  void scheduleEvaluation("permissions.onAdded");
+});
+
+chrome.permissions.onRemoved.addListener(() => {
+  void scheduleEvaluation("permissions.onRemoved");
 });
 
 chrome.tabs.onCreated.addListener((tab) => {

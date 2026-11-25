@@ -57,10 +57,17 @@ function setWakeIndicatorVisible(visible) {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (!message || message.type !== "YTM_WAKE_STATE") {
+  if (!message) {
     return;
   }
 
-  setWakeIndicatorVisible(Boolean(message.active));
-  sendResponse({ ok: true });
+  if (message.type === "YTM_WAKE_PING") {
+    sendResponse({ ok: true });
+    return;
+  }
+
+  if (message.type === "YTM_WAKE_STATE") {
+    setWakeIndicatorVisible(Boolean(message.active));
+    sendResponse({ ok: true });
+  }
 });

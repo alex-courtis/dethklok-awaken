@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Keep Awake Sites</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 12px;
+      min-width: 280px;
+      color: #e6e6eb;
+      background: #141418;
+      font-size: 13px;
+    }
+    .row {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+    input {
+      flex: 1;
+      padding: 6px 8px;
+      border-radius: 6px;
+      border: 1px solid #383844;
+      background: #1e1e26;
+      color: #fff;
+      font-size: 13px;
+    }
+    button {
+      padding: 6px 10px;
+      border-radius: 6px;
+      border: 1px solid #454554;
+      background: #282834;
+      color: #fff;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    button:hover {
+      background: #353546;
+    }
+    ul {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    li {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 5px 0;
+      border-bottom: 1px solid #252530;
+    }
+    .muted {
+      color: #9a9aa8;
+      font-size: 11px;
+    }
+    #status {
+      min-height: 16px;
+      margin-top: 8px;
+      font-size: 12px;
+      color: #ff944d;
+    }
+  </style>
+</head>
+<body>
+  <form id="add-form" class="row">
+    <input id="host-input" type="text" placeholder="example.com" autocomplete="off" required />
+    <button type="submit">Add</button>
+  </form>
+  <ul id="site-list"></ul>
+  <div id="status"></div>
+  <script src="options.js"></script>
+</body>
+</html>
