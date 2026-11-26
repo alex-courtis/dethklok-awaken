@@ -13,9 +13,9 @@ let evaluationQueue = Promise.resolve();
 function logEvent(message, details = null) {
   const stamp = new Date().toISOString();
   if (details !== null) {
-    console.log(`[YTM Keep Awake ${stamp}] ${message}`, details);
+    console.log(`[Dethklok Awaken ${stamp}] ${message}`, details);
   } else {
-    console.log(`[YTM Keep Awake ${stamp}] ${message}`);
+    console.log(`[Dethklok Awaken ${stamp}] ${message}`);
   }
 }
 

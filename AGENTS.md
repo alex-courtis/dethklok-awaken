@@ -1,7 +1,7 @@
-# AGENTS.md — Maintaining `ytm-keep-awake`
+# AGENTS.md — Maintaining `dethklok-awaken`
 
 ## Project Overview
-`ytm-keep-awake` is a lightweight **Manifest V3** Chrome extension designed for **ChromeOS / ChromeOS Flex** (tested on a Lenovo ThinkPad X1 Yoga Gen 5 in tablet and laptop modes). Its sole responsibility is to prevent display dimming and idle device sleep while configured sites (initially `music.youtube.com` and `www.youtube.com`, all removable) are open in a browser tab or a standalone PWA/app window (`type: "app"`), and to release the keep-awake hold as soon as all matching tabs/windows are closed.
+`dethklok-awaken` is a lightweight **Manifest V3** Chrome extension designed for **ChromeOS / ChromeOS Flex** (tested on a Lenovo ThinkPad X1 Yoga Gen 5 in tablet and laptop modes). Its sole responsibility is to prevent display dimming and idle device sleep while configured sites (initially `music.youtube.com` and `www.youtube.com`, all removable) are open in a browser tab or a standalone PWA/app window (`type: "app"`), and to release the keep-awake hold as soon as all matching tabs/windows are closed.
 
 - **Target Runtime:** Chrome / ChromeOS Flex (Manifest V3 event-driven service worker)
 - **Permissions:** `"power"`, `"tabs"`, `"storage"`, `"scripting"` (plus `"optional_host_permissions"` for user-added sites)
@@ -25,7 +25,7 @@ Preserve these invariants when making edits:
    - When `matchingTabs.length === 0`, call `chrome.power.releaseKeepAwake()` and transition `currentWakeState` to `"released"` so sleep is never left stuck on.
    - Always check `chrome.runtime.lastError` after `chrome.power` calls and log errors rather than silently swallowing failures.
 5. **Preserve Console Logging:**
-   Timestamped `console.log` statements with the `[YTM Keep Awake ...]` prefix are intentionally kept for observability and field debugging on ChromeOS Flex. Keep them clear, structured, and non-noisy.
+   Timestamped `console.log` statements with the `[Dethklok Awaken ...]` prefix are intentionally kept for observability and field debugging on ChromeOS Flex. Keep them clear, structured, and non-noisy.
 
 ## Common Gotchas & ChromeOS Flex Context
 - **Stuck Wake Lock Risk:** In an earlier draft, calling `requestKeepAwake("display")` without disciplined release/state tracking caused the device to stay awake even after closing tabs and restarting. Always test both opening *and* closing tabs and PWA windows after modifying `background.js`.
@@ -36,7 +36,7 @@ Preserve these invariants when making edits:
 ## Testing & Verification Checklist
 Because this is an unpacked extension without a complex build step, verify changes manually on ChromeOS Flex:
 
-1. **Reload & Inspect:** Open `chrome://extensions`, click **Reload** on **YouTube Music Keep Awake**, confirm zero manifest or service worker errors, and open **Service worker** DevTools to view the **Console**.
+1. **Reload & Inspect:** Open `chrome://extensions`, click **Reload** on **Dethklok Awaken**, confirm zero manifest or service worker errors, and open **Service worker** DevTools to view the **Console**.
 2. **Browser Tab Flow:**
    - Open `https://music.youtube.com`, any `https://www.youtube.com` page, or a user-added host in a normal browser tab.
    - Confirm logs show `STATE CHANGE -> DISPLAY AWAKE (requested)` and verify the display/device does not sleep while idle.

@@ -1,4 +1,4 @@
-const INDICATOR_ID = "ytm-keep-awake-indicator";
+const INDICATOR_ID = "dethklok-awaken-indicator";
 const SQUIRCLE_RADIUS = "13.5px";
 const ORANGE_OUTLINE = "#ff6a00";
 
