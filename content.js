@@ -8,10 +8,10 @@ function createNathanSquircleBadge() {
   badge.setAttribute("aria-hidden", "true");
   Object.assign(badge.style, {
     position: "fixed",
-    top: "16px",
-    right: "16px",
-    width: "40px",
-    height: "40px",
+    top: "20px",
+    right: "20px",
+    width: "60px",
+    height: "60px",
     borderRadius: SQUIRCLE_RADIUS,
     border: `2px solid ${ORANGE_OUTLINE}`,
     boxSizing: "border-box",
