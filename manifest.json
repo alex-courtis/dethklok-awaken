@@ -13,6 +13,10 @@
     "https://*/*",
     "http://*/*"
   ],
+  "action": {
+    "default_title": "Dethklok Awaken",
+    "default_icon": "icons/nathan-squircle-120.png"
+  },
   "background": {
     "service_worker": "background.js"
   },

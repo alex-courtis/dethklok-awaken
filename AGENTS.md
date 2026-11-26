@@ -6,7 +6,7 @@
 - **Target Runtime:** Chrome / ChromeOS Flex (Manifest V3 event-driven service worker)
 - **Permissions:** `"power"`, `"tabs"`, `"storage"`, `"scripting"` (plus `"optional_host_permissions"` for user-added sites)
 - **Core Files:**
-  - `manifest.json` — Extension manifest (MV3, permissions, background service worker, embedded options UI, content script & web-accessible icon match patterns)
+  - `manifest.json` — Extension manifest (MV3, permissions, background service worker, toolbar `action` icon, embedded options UI, content script & web-accessible icon match patterns)
   - `background.js` — Service worker handling tab/window/storage/permission events, URL matching, serialized state evaluation, `chrome.power` transitions, and timestamped console logging
   - `content.js` — Content script rendering/removing the active squircle indicator badge in matching pages
   - `options.html` / `options.js` — Minimal embedded options UI for adding/removing any configured hostname (including defaults)
