@@ -7,10 +7,17 @@ const STORAGE_KEY_HOSTS = "configuredHosts";
 const STORAGE_KEY_INITIALIZED = "hostsInitialized";
 const STORAGE_KEY_ENABLED = "extensionEnabled";
 const TOGGLE_MESSAGE = "DETHKLOK_TOGGLE_ENABLED";
+const ICON_PATH = "icons/nathan-squircle-120.png";
+const DIMMED_ICON_SIZES = [16, 24, 32, 48];
+const DIMMED_ICON_ALPHA = 0.6;
 
 // "display" = active wake lock held by this extension; "released" = lock released/inactive.
 let currentWakeState = "released";
 let evaluationQueue = Promise.resolve();
+// Cached so the dimmed toolbar icon is only rendered once per service worker lifetime.
+let dimmedIconData = null;
+// "enabled" | "disabled" | null (unknown, e.g. after a service worker restart).
+let appliedToolbarState = null;
 
 function logEvent(message, details = null) {
   const stamp = new Date().toISOString();
@@ -77,6 +84,56 @@ async function toggleEnabled(source) {
     logEvent(`STATE CHANGE -> ${next ? "ENABLED" : "DISABLED"} (toggled from ${source})`);
   } catch (err) {
     logEvent("ERROR toggling enabled state", String(err));
+  }
+}
+
+// Renders a greyscale, semi-transparent copy of the toolbar icon (matching the dimmed page badge).
+async function getDimmedIconData() {
+  if (dimmedIconData) {
+    return dimmedIconData;
+  }
+  const response = await fetch(chrome.runtime.getURL(ICON_PATH));
+  const bitmap = await createImageBitmap(await response.blob());
+  const result = {};
+  for (const size of DIMMED_ICON_SIZES) {
+    const ctx = new OffscreenCanvas(size, size).getContext("2d");
+    ctx.drawImage(bitmap, 0, 0, size, size);
+    const image = ctx.getImageData(0, 0, size, size);
+    const px = image.data;
+    for (let i = 0; i < px.length; i += 4) {
+      const grey = Math.round(0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]);
+      px[i] = grey;
+      px[i + 1] = grey;
+      px[i + 2] = grey;
+      px[i + 3] = Math.round(px[i + 3] * DIMMED_ICON_ALPHA);
+    }
+    result[size] = image;
+  }
+  dimmedIconData = result;
+  return result;
+}
+
+// Toolbar icon follows the enabled state: normal when enabled, dimmed when disabled.
+// setIcon/setTitle do not persist across browser restarts, so this runs on every evaluation.
+async function applyToolbarState(enabled) {
+  try {
+    const wanted = enabled ? "enabled" : "disabled";
+    if (wanted === appliedToolbarState) {
+      return;
+    }
+    if (enabled) {
+      await chrome.action.setIcon({ path: ICON_PATH });
+    } else {
+      await chrome.action.setIcon({ imageData: await getDimmedIconData() });
+    }
+    await chrome.action.setTitle({
+      title: enabled
+        ? "Dethklok Awaken: enabled (click to disable)"
+        : "Dethklok Awaken: disabled (click to enable)"
+    });
+    appliedToolbarState = wanted;
+  } catch (err) {
+    logEvent("ERROR updating toolbar icon", String(err));
   }
 }
 
@@ -232,6 +289,7 @@ async function evaluateAndApplyState(triggerReason) {
   const allowedHosts = await getConfiguredHostnames();
   const matchingTabs = await getMatchingTabs(allowedHosts);
   const isEnabled = await getEnabled();
+  await applyToolbarState(isEnabled);
   const shouldHold = isEnabled && matchingTabs.length > 0;
   logEvent(`Evaluated trigger: ${triggerReason}`, {
     enabled: isEnabled,
@@ -272,6 +330,12 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   } else if (areaName === "local" && changes[STORAGE_KEY_ENABLED]) {
     void scheduleEvaluation("storage.onChanged (extensionEnabled)");
   }
+});
+
+// A left click on the toolbar icon toggles enabled/disabled. This only fires while the action
+// has no popup; adding a popup later would need a different toggle trigger.
+chrome.action.onClicked.addListener(() => {
+  void enqueue(() => toggleEnabled("toolbar icon"));
 });
 
 // Right-click on the page indicator asks the service worker to flip the enabled state.

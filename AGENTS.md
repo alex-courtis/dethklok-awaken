@@ -7,7 +7,7 @@
 - **Permissions:** `"power"`, `"tabs"`, `"storage"`, `"scripting"` (plus `"optional_host_permissions"` for user-added sites)
 - **Core Files:**
   - `manifest.json` — Extension manifest (MV3, permissions, background service worker, toolbar `action` icon, embedded options UI, content script & web-accessible icon match patterns)
-  - `background.js` — Service worker handling tab/window/storage/permission events, URL matching, serialized state evaluation, the enabled/disabled toggle, `chrome.power` transitions, and timestamped console logging
+  - `background.js` — Service worker handling tab/window/storage/permission events, URL matching, serialized state evaluation, the enabled/disabled toggle (page badge message and toolbar icon click), the dimmed toolbar icon, `chrome.power` transitions, and timestamped console logging
   - `content.js` — Content script rendering/removing the squircle indicator badge in matching pages (orange when active, dimmed grey when disabled) and sending the right-click toggle request
   - `options.html` / `options.js` — Minimal embedded options UI for adding/removing any configured hostname (including defaults)
 
@@ -28,6 +28,8 @@ Preserve these invariants when making edits:
    - The indicator has `pointer-events: none` so left clicks and all other input pass through to the page underneath. Right-clicks (or touch long-presses) are caught by a capture-phase `contextmenu` listener on `window` in `content.js` that hit-tests the badge's bounding box; a hit sends `DETHKLOK_TOGGLE_ENABLED` to the service worker, which flips `extensionEnabled` in `chrome.storage.local` (device-local, defaults to enabled, persists across restarts).
    - The toggle runs through `evaluationQueue` (via `enqueue`) so rapid clicks cannot race; the resulting `storage.onChanged` event triggers a normal serialized evaluation.
    - While disabled, `shouldHold` is always `false` (keep-awake is released), but the indicator stays visible on matching pages in a dimmed grey state so it can be right-clicked to re-enable. The service worker sends `{ active, enabled }` in `YTM_WAKE_STATE`; the content script shows the badge when `active || !enabled`.
+   - Left-clicking the toolbar icon (`chrome.action.onClicked`) toggles the same state through `enqueue`. This relies on the action having no `default_popup`; adding a popup would stop `onClicked` firing and require a different trigger. Right-clicking the toolbar icon is left to Chrome's own menu (extensions cannot intercept it).
+   - The toolbar icon follows the state: normal when enabled, greyscale at 60% opacity when disabled (rendered once via `OffscreenCanvas` and applied with `chrome.action.setIcon`). `setIcon`/`setTitle` do not persist across browser restarts, so `applyToolbarState` runs from `evaluateAndApplyState`. The tooltip says whether the extension is enabled and what a click does.
 6. **Preserve Console Logging:**
    Timestamped `console.log` statements with the `[Dethklok Awaken ...]` prefix are intentionally kept for observability and field debugging on ChromeOS Flex. Keep them clear, structured, and non-noisy.
 
@@ -54,6 +56,11 @@ Because this is an unpacked extension without a complex build step, verify chang
    - With a matching tab open and `DISPLAY AWAKE` active, right-click the indicator badge and confirm no browser context menu appears, the badge turns dimmed grey, and logs show `STATE CHANGE -> DISABLED` followed by `STATE CHANGE -> RELEASED (normal sleep restored)`.
    - Right-click the dimmed badge and confirm logs show `STATE CHANGE -> ENABLED` and `STATE CHANGE -> DISPLAY AWAKE (requested)` with the orange badge restored.
    - While disabled, close all matching tabs/windows and reload the extension; confirm the disabled state persists and sleep is not held.
+
+5. **Toolbar Icon Toggle:**
+   - Left-click the toolbar icon and confirm it turns grey/dim, the tooltip reads `disabled (click to enable)`, the page badge dims, and logs show `STATE CHANGE -> DISABLED (toggled from toolbar icon)` then `RELEASED`.
+   - Left-click again and confirm the icon, badge and `DISPLAY AWAKE` return.
+   - Toggle from the page badge and confirm the toolbar icon follows; reload the extension while disabled and confirm the icon stays dim.
 
 ## Guidelines for Future Changes
 - **Keep scope minimal:** Avoid adding unnecessary permissions, background polling loops, or complex UI unless asked.
