@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "YouTube Music Keep Awake",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "description": "Prevents display dimming and device sleep on ChromeOS while configured sites are open in a browser tab or PWA/app window, with a 40px orange-outlined Nathan Explosion squircle indicator when active.",
   "permissions": [
     "power",
@@ -37,8 +37,7 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "icons/nathan-squircle-120.png",
-        "icons/nathan-squircle-40.png"
+        "icons/nathan-squircle-120.png"
       ],
       "matches": [
         "https://music.youtube.com/*",
