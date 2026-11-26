@@ -1,6 +1,58 @@
 const INDICATOR_ID = "dethklok-awaken-indicator";
 const SQUIRCLE_RADIUS = "13.5px";
 const ORANGE_OUTLINE = "#ff6a00";
+const DISABLED_OUTLINE = "#6b6b75";
+const TOGGLE_MESSAGE = "DETHKLOK_TOGGLE_ENABLED";
+
+function requestToggle() {
+  try {
+    const pending = chrome.runtime.sendMessage({ type: TOGGLE_MESSAGE });
+    if (pending && typeof pending.catch === "function") {
+      pending.catch(() => {});
+    }
+  } catch {
+    // Extension context invalidated (extension reloaded); nothing to do.
+  }
+}
+
+function applyBadgeState(badge, enabled) {
+  const img = badge.firstElementChild;
+  badge.style.borderColor = enabled ? ORANGE_OUTLINE : DISABLED_OUTLINE;
+  badge.style.opacity = enabled ? "1" : "0.6";
+  if (img) {
+    img.style.filter = enabled ? "none" : "grayscale(1)";
+  }
+}
+
+// The badge itself ignores pointer events so left clicks (and everything else) reach the
+// page underneath. Right-clicks are detected here instead, by hit-testing the badge's box.
+function isInsideBadge(event) {
+  const badge = document.getElementById(INDICATOR_ID);
+  if (!badge) {
+    return false;
+  }
+  const rect = badge.getBoundingClientRect();
+  return (
+    event.clientX >= rect.left &&
+    event.clientX <= rect.right &&
+    event.clientY >= rect.top &&
+    event.clientY <= rect.bottom
+  );
+}
+
+// Capture phase on window so this runs before page handlers; also covers touch long-press.
+window.addEventListener(
+  "contextmenu",
+  (event) => {
+    if (!isInsideBadge(event)) {
+      return;
+    }
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    requestToggle();
+  },
+  true
+);
 
 function createNathanSquircleBadge() {
   const badge = document.createElement("div");
@@ -38,7 +90,7 @@ function createNathanSquircleBadge() {
   return badge;
 }
 
-function setWakeIndicatorVisible(visible) {
+function setWakeIndicatorVisible(visible, enabled) {
   const existing = document.getElementById(INDICATOR_ID);
 
   if (!visible) {
@@ -49,10 +101,12 @@ function setWakeIndicatorVisible(visible) {
   }
 
   if (existing) {
+    applyBadgeState(existing, enabled);
     return;
   }
 
   const badge = createNathanSquircleBadge();
+  applyBadgeState(badge, enabled);
   (document.body || document.documentElement).appendChild(badge);
 }
 
@@ -67,7 +121,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === "YTM_WAKE_STATE") {
-    setWakeIndicatorVisible(Boolean(message.active));
+    const enabled = message.enabled !== false;
+    // Keep the badge visible while disabled so it can be right-clicked to re-enable.
+    setWakeIndicatorVisible(Boolean(message.active) || !enabled, enabled);
     sendResponse({ ok: true });
   }
 });

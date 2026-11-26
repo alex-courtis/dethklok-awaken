@@ -5,6 +5,8 @@ const INITIAL_DEFAULT_HOSTNAMES = [
 
 const STORAGE_KEY_HOSTS = "configuredHosts";
 const STORAGE_KEY_INITIALIZED = "hostsInitialized";
+const STORAGE_KEY_ENABLED = "extensionEnabled";
+const TOGGLE_MESSAGE = "DETHKLOK_TOGGLE_ENABLED";
 
 // "display" = active wake lock held by this extension; "released" = lock released/inactive.
 let currentWakeState = "released";
@@ -55,6 +57,27 @@ async function ensureHostsInitialized() {
     [STORAGE_KEY_INITIALIZED]: true
   });
   return defaults;
+}
+
+// Device-local on/off switch (defaults to enabled); toggled by right-clicking the page indicator.
+async function getEnabled() {
+  try {
+    const stored = await chrome.storage.local.get({ [STORAGE_KEY_ENABLED]: true });
+    return stored[STORAGE_KEY_ENABLED] !== false;
+  } catch (err) {
+    logEvent("ERROR reading enabled state from storage", String(err));
+    return true;
+  }
+}
+
+async function toggleEnabled(source) {
+  try {
+    const next = !(await getEnabled());
+    await chrome.storage.local.set({ [STORAGE_KEY_ENABLED]: next });
+    logEvent(`STATE CHANGE -> ${next ? "ENABLED" : "DISABLED"} (toggled from ${source})`);
+  } catch (err) {
+    logEvent("ERROR toggling enabled state", String(err));
+  }
 }
 
 async function getConfiguredHostnames() {
@@ -147,15 +170,15 @@ async function getMatchingTabs(allowedHosts) {
   return Array.from(matchedById.entries()).map(([id, url]) => ({ id, url }));
 }
 
-async function syncIndicatorsToTabs(matchingTabs, isActive) {
+async function syncIndicatorsToTabs(matchingTabs, isActive, isEnabled) {
   for (const tab of matchingTabs) {
-    if (isActive) {
-      await ensureContentScriptForTab(tab.id);
-    }
+    // The indicator is also shown while disabled so it can be right-clicked to re-enable.
+    await ensureContentScriptForTab(tab.id);
     try {
       await chrome.tabs.sendMessage(tab.id, {
         type: "YTM_WAKE_STATE",
-        active: isActive
+        active: isActive,
+        enabled: isEnabled
       });
     } catch {
       // Content script may not be ready yet if the tab is still spinning up;
@@ -164,7 +187,7 @@ async function syncIndicatorsToTabs(matchingTabs, isActive) {
   }
 }
 
-async function setDisplayWakeLock(shouldHold, matchingTabs) {
+async function setDisplayWakeLock(shouldHold, matchingTabs, isEnabled) {
   if (shouldHold) {
     if (currentWakeState !== "display") {
       chrome.power.requestKeepAwake("display");
@@ -184,7 +207,7 @@ async function setDisplayWakeLock(shouldHold, matchingTabs) {
       });
     }
 
-    await syncIndicatorsToTabs(matchingTabs, true);
+    await syncIndicatorsToTabs(matchingTabs, true, isEnabled);
   } else {
     chrome.power.releaseKeepAwake();
     if (chrome.runtime.lastError) {
@@ -195,33 +218,43 @@ async function setDisplayWakeLock(shouldHold, matchingTabs) {
     if (currentWakeState !== "released") {
       currentWakeState = "released";
       logEvent("STATE CHANGE -> RELEASED (normal sleep restored)");
+    } else if (!isEnabled) {
+      logEvent("Extension disabled; state is 'released'");
     } else {
       logEvent("Confirmed no matching tabs open; state is 'released'");
     }
+
+    await syncIndicatorsToTabs(matchingTabs, false, isEnabled);
   }
 }
 
 async function evaluateAndApplyState(triggerReason) {
   const allowedHosts = await getConfiguredHostnames();
   const matchingTabs = await getMatchingTabs(allowedHosts);
-  const shouldHold = matchingTabs.length > 0;
+  const isEnabled = await getEnabled();
+  const shouldHold = isEnabled && matchingTabs.length > 0;
   logEvent(`Evaluated trigger: ${triggerReason}`, {
+    enabled: isEnabled,
     shouldHold,
     activeTabCount: matchingTabs.length,
     hosts: Array.from(allowedHosts)
   });
-  await setDisplayWakeLock(shouldHold, matchingTabs);
+  await setDisplayWakeLock(shouldHold, matchingTabs, isEnabled);
 }
 
-function scheduleEvaluation(triggerReason) {
+function enqueue(task) {
   evaluationQueue = evaluationQueue
     .catch((err) => {
       logEvent("Recovered queue from previous error", String(err));
     })
-    .then(async () => {
-      await evaluateAndApplyState(triggerReason);
-    });
+    .then(task);
   return evaluationQueue;
+}
+
+function scheduleEvaluation(triggerReason) {
+  return enqueue(async () => {
+    await evaluateAndApplyState(triggerReason);
+  });
 }
 
 // Register all listeners synchronously at the top level for Manifest V3 service workers.
@@ -236,6 +269,18 @@ chrome.runtime.onStartup.addListener(() => {
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === "sync" && changes[STORAGE_KEY_HOSTS]) {
     void scheduleEvaluation("storage.onChanged (configuredHosts)");
+  } else if (areaName === "local" && changes[STORAGE_KEY_ENABLED]) {
+    void scheduleEvaluation("storage.onChanged (extensionEnabled)");
+  }
+});
+
+// Right-click on the page indicator asks the service worker to flip the enabled state.
+// The toggle runs through evaluationQueue so rapid clicks cannot race; the resulting
+// storage change then triggers a serialized evaluation.
+chrome.runtime.onMessage.addListener((message, sender) => {
+  if (message && message.type === TOGGLE_MESSAGE) {
+    const source = sender && sender.tab ? `tabId=${sender.tab.id}` : "unknown sender";
+    void enqueue(() => toggleEnabled(source));
   }
 });
 

@@ -7,8 +7,8 @@
 - **Permissions:** `"power"`, `"tabs"`, `"storage"`, `"scripting"` (plus `"optional_host_permissions"` for user-added sites)
 - **Core Files:**
   - `manifest.json` — Extension manifest (MV3, permissions, background service worker, toolbar `action` icon, embedded options UI, content script & web-accessible icon match patterns)
-  - `background.js` — Service worker handling tab/window/storage/permission events, URL matching, serialized state evaluation, `chrome.power` transitions, and timestamped console logging
-  - `content.js` — Content script rendering/removing the active squircle indicator badge in matching pages
+  - `background.js` — Service worker handling tab/window/storage/permission events, URL matching, serialized state evaluation, the enabled/disabled toggle, `chrome.power` transitions, and timestamped console logging
+  - `content.js` — Content script rendering/removing the squircle indicator badge in matching pages (orange when active, dimmed grey when disabled) and sending the right-click toggle request
   - `options.html` / `options.js` — Minimal embedded options UI for adding/removing any configured hostname (including defaults)
 
 ## Core Architecture & Design Invariants
@@ -24,7 +24,11 @@ Preserve these invariants when making edits:
    - When `matchingTabs.length > 0`, request `"display"` keep-awake via `chrome.power.requestKeepAwake("display")` only if `currentWakeState !== "display"`.
    - When `matchingTabs.length === 0`, call `chrome.power.releaseKeepAwake()` and transition `currentWakeState` to `"released"` so sleep is never left stuck on.
    - Always check `chrome.runtime.lastError` after `chrome.power` calls and log errors rather than silently swallowing failures.
-5. **Preserve Console Logging:**
+5. **Enabled / Disabled Toggle:**
+   - The indicator has `pointer-events: none` so left clicks and all other input pass through to the page underneath. Right-clicks (or touch long-presses) are caught by a capture-phase `contextmenu` listener on `window` in `content.js` that hit-tests the badge's bounding box; a hit sends `DETHKLOK_TOGGLE_ENABLED` to the service worker, which flips `extensionEnabled` in `chrome.storage.local` (device-local, defaults to enabled, persists across restarts).
+   - The toggle runs through `evaluationQueue` (via `enqueue`) so rapid clicks cannot race; the resulting `storage.onChanged` event triggers a normal serialized evaluation.
+   - While disabled, `shouldHold` is always `false` (keep-awake is released), but the indicator stays visible on matching pages in a dimmed grey state so it can be right-clicked to re-enable. The service worker sends `{ active, enabled }` in `YTM_WAKE_STATE`; the content script shows the badge when `active || !enabled`.
+6. **Preserve Console Logging:**
    Timestamped `console.log` statements with the `[Dethklok Awaken ...]` prefix are intentionally kept for observability and field debugging on ChromeOS Flex. Keep them clear, structured, and non-noisy.
 
 ## Common Gotchas & ChromeOS Flex Context
@@ -45,6 +49,11 @@ Because this is an unpacked extension without a complex build step, verify chang
    - Launch YouTube Music, YouTube, or a custom site as an installed PWA/app window.
    - Confirm `DISPLAY AWAKE` activates without duplicate lock requests.
    - Close the PWA window (and any remaining matching tabs) and confirm `RELEASED` is logged and normal sleep resumes.
+
+4. **Enable / Disable Toggle Flow:**
+   - With a matching tab open and `DISPLAY AWAKE` active, right-click the indicator badge and confirm no browser context menu appears, the badge turns dimmed grey, and logs show `STATE CHANGE -> DISABLED` followed by `STATE CHANGE -> RELEASED (normal sleep restored)`.
+   - Right-click the dimmed badge and confirm logs show `STATE CHANGE -> ENABLED` and `STATE CHANGE -> DISPLAY AWAKE (requested)` with the orange badge restored.
+   - While disabled, close all matching tabs/windows and reload the extension; confirm the disabled state persists and sleep is not held.
 
 ## Guidelines for Future Changes
 - **Keep scope minimal:** Avoid adding unnecessary permissions, background polling loops, or complex UI unless asked.
