@@ -8,14 +8,19 @@ const STORAGE_KEY_INITIALIZED = "hostsInitialized";
 const STORAGE_KEY_ENABLED = "extensionEnabled";
 const TOGGLE_MESSAGE = "DETHKLOK_TOGGLE_ENABLED";
 const ICON_PATH = "icons/nathan-squircle-120.png";
-const DIMMED_ICON_SIZES = [16, 24, 32, 48];
+const TOOLBAR_ICON_SIZES = [16, 24, 32, 48];
+// Keep in sync with the page indicator in content.js (border colours, radius, opacity, background).
+const ORANGE_OUTLINE = "#ff6a00";
+const DISABLED_OUTLINE = "#6b6b75";
+const ICON_BACKGROUND = "#121216";
+const BADGE_RADIUS_RATIO = 13.5 / 60;
 const DIMMED_ICON_ALPHA = 0.6;
 
 // "display" = active wake lock held by this extension; "released" = lock released/inactive.
 let currentWakeState = "released";
 let evaluationQueue = Promise.resolve();
-// Cached so the dimmed toolbar icon is only rendered once per service worker lifetime.
-let dimmedIconData = null;
+// Cached so each toolbar icon variant is only rendered once per service worker lifetime.
+const toolbarIconCache = {};
 // "enabled" | "disabled" | null (unknown, e.g. after a service worker restart).
 let appliedToolbarState = null;
 
@@ -87,33 +92,63 @@ async function toggleEnabled(source) {
   }
 }
 
-// Renders a greyscale, semi-transparent copy of the toolbar icon (matching the dimmed page badge).
-async function getDimmedIconData() {
-  if (dimmedIconData) {
-    return dimmedIconData;
+function roundedRectPath(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// Renders the toolbar icon like the page indicator: squircle with an orange outline when enabled,
+// grey outline + greyscale + 60% opacity when disabled. The border is at least 1px so it stays
+// visible at 16px (proportionally a little thicker than on the page badge).
+async function getToolbarIconData(enabled) {
+  const key = enabled ? "enabled" : "disabled";
+  if (toolbarIconCache[key]) {
+    return toolbarIconCache[key];
   }
   const response = await fetch(chrome.runtime.getURL(ICON_PATH));
   const bitmap = await createImageBitmap(await response.blob());
   const result = {};
-  for (const size of DIMMED_ICON_SIZES) {
+  for (const size of TOOLBAR_ICON_SIZES) {
     const ctx = new OffscreenCanvas(size, size).getContext("2d");
-    ctx.drawImage(bitmap, 0, 0, size, size);
+    const radius = size * BADGE_RADIUS_RATIO;
+    const border = Math.max(1, Math.round(size / 16));
+    const inner = size - 2 * border;
+
+    roundedRectPath(ctx, 0, 0, size, size, radius);
+    ctx.fillStyle = enabled ? ORANGE_OUTLINE : DISABLED_OUTLINE;
+    ctx.fill();
+
+    ctx.save();
+    roundedRectPath(ctx, border, border, inner, inner, Math.max(0, radius - border));
+    ctx.clip();
+    ctx.fillStyle = ICON_BACKGROUND;
+    ctx.fillRect(0, 0, size, size);
+    ctx.drawImage(bitmap, border, border, inner, inner);
+    ctx.restore();
+
     const image = ctx.getImageData(0, 0, size, size);
-    const px = image.data;
-    for (let i = 0; i < px.length; i += 4) {
-      const grey = Math.round(0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]);
-      px[i] = grey;
-      px[i + 1] = grey;
-      px[i + 2] = grey;
-      px[i + 3] = Math.round(px[i + 3] * DIMMED_ICON_ALPHA);
+    if (!enabled) {
+      const px = image.data;
+      for (let i = 0; i < px.length; i += 4) {
+        const grey = Math.round(0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]);
+        px[i] = grey;
+        px[i + 1] = grey;
+        px[i + 2] = grey;
+        px[i + 3] = Math.round(px[i + 3] * DIMMED_ICON_ALPHA);
+      }
     }
     result[size] = image;
   }
-  dimmedIconData = result;
+  toolbarIconCache[key] = result;
   return result;
 }
 
-// Toolbar icon follows the enabled state: normal when enabled, dimmed when disabled.
+// Toolbar icon follows the enabled state: orange-outlined when enabled, dimmed when disabled.
 // setIcon/setTitle do not persist across browser restarts, so this runs on every evaluation.
 async function applyToolbarState(enabled) {
   try {
@@ -121,11 +156,7 @@ async function applyToolbarState(enabled) {
     if (wanted === appliedToolbarState) {
       return;
     }
-    if (enabled) {
-      await chrome.action.setIcon({ path: ICON_PATH });
-    } else {
-      await chrome.action.setIcon({ imageData: await getDimmedIconData() });
-    }
+    await chrome.action.setIcon({ imageData: await getToolbarIconData(enabled) });
     await chrome.action.setTitle({
       title: enabled
         ? "Dethklok Awaken: enabled (click to disable)"

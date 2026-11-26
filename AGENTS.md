@@ -29,7 +29,7 @@ Preserve these invariants when making edits:
    - The toggle runs through `evaluationQueue` (via `enqueue`) so rapid clicks cannot race; the resulting `storage.onChanged` event triggers a normal serialized evaluation.
    - While disabled, `shouldHold` is always `false` (keep-awake is released), but the indicator stays visible on matching pages in a dimmed grey state so it can be right-clicked to re-enable. The service worker sends `{ active, enabled }` in `YTM_WAKE_STATE`; the content script shows the badge when `active || !enabled`.
    - Left-clicking the toolbar icon (`chrome.action.onClicked`) toggles the same state through `enqueue`. This relies on the action having no `default_popup`; adding a popup would stop `onClicked` firing and require a different trigger. Right-clicking the toolbar icon is left to Chrome's own menu (extensions cannot intercept it).
-   - The toolbar icon follows the state: normal when enabled, greyscale at 60% opacity when disabled (rendered once via `OffscreenCanvas` and applied with `chrome.action.setIcon`). `setIcon`/`setTitle` do not persist across browser restarts, so `applyToolbarState` runs from `evaluateAndApplyState`. The tooltip says whether the extension is enabled and what a click does.
+   - The toolbar icon mirrors the page indicator: the Nathan squircle with the same orange (`#ff6a00`) outline when enabled; grey outline, greyscale and 60% opacity when disabled. Both variants are rendered at runtime via `OffscreenCanvas` (16/24/32/48px, border at least 1px so it stays visible) and applied with `chrome.action.setIcon`; keep the colours in `background.js` in sync with `content.js`. The manifest `default_icon` is the plain PNG and only shows briefly until the service worker applies the rendered icon. `setIcon`/`setTitle` do not persist across browser restarts, so `applyToolbarState` runs from `evaluateAndApplyState`. The tooltip says whether the extension is enabled and what a click does.
 6. **Preserve Console Logging:**
    Timestamped `console.log` statements with the `[Dethklok Awaken ...]` prefix are intentionally kept for observability and field debugging on ChromeOS Flex. Keep them clear, structured, and non-noisy.
 
@@ -58,7 +58,8 @@ Because this is an unpacked extension without a complex build step, verify chang
    - While disabled, close all matching tabs/windows and reload the extension; confirm the disabled state persists and sleep is not held.
 
 5. **Toolbar Icon Toggle:**
-   - Left-click the toolbar icon and confirm it turns grey/dim, the tooltip reads `disabled (click to enable)`, the page badge dims, and logs show `STATE CHANGE -> DISABLED (toggled from toolbar icon)` then `RELEASED`.
+   - Confirm the toolbar icon shows the squircle with an orange outline when enabled.
+   - Left-click the toolbar icon and confirm it turns grey/dim with a grey outline, the tooltip reads `disabled (click to enable)`, the page badge dims, and logs show `STATE CHANGE -> DISABLED (toggled from toolbar icon)` then `RELEASED`.
    - Left-click again and confirm the icon, badge and `DISPLAY AWAKE` return.
    - Toggle from the page badge and confirm the toolbar icon follows; reload the extension while disabled and confirm the icon stays dim.
 
