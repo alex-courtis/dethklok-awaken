@@ -1,5 +1,6 @@
-const DEFAULT_HOSTS = ["music.youtube.com", "www.youtube.com"];
-const STORAGE_KEY_CUSTOM_HOSTS = "customHosts";
+const INITIAL_DEFAULT_HOSTS = ["music.youtube.com", "www.youtube.com"];
+const STORAGE_KEY_HOSTS = "configuredHosts";
+const STORAGE_KEY_INITIALIZED = "hostsInitialized";
 
 const formEl = document.getElementById("add-form");
 const inputEl = document.getElementById("host-input");
@@ -33,30 +34,35 @@ function hostPatterns(host) {
   return [`https://${host}/*`, `http://${host}/*`];
 }
 
-async function getCustomHosts() {
-  const data = await chrome.storage.sync.get({ [STORAGE_KEY_CUSTOM_HOSTS]: [] });
-  return Array.isArray(data[STORAGE_KEY_CUSTOM_HOSTS]) ? data[STORAGE_KEY_CUSTOM_HOSTS] : [];
+async function getConfiguredHosts() {
+  const data = await chrome.storage.sync.get({
+    [STORAGE_KEY_HOSTS]: [],
+    [STORAGE_KEY_INITIALIZED]: false
+  });
+  if (data[STORAGE_KEY_INITIALIZED]) {
+    return Array.isArray(data[STORAGE_KEY_HOSTS])
+      ? Array.from(new Set(data[STORAGE_KEY_HOSTS].map(normalizeHost).filter(Boolean)))
+      : [];
+  }
+  const defaults = [...INITIAL_DEFAULT_HOSTS];
+  await chrome.storage.sync.set({
+    [STORAGE_KEY_HOSTS]: defaults,
+    [STORAGE_KEY_INITIALIZED]: true
+  });
+  return defaults;
 }
 
-async function saveCustomHosts(hosts) {
-  await chrome.storage.sync.set({ [STORAGE_KEY_CUSTOM_HOSTS]: hosts });
+async function saveConfiguredHosts(hosts) {
+  await chrome.storage.sync.set({
+    [STORAGE_KEY_HOSTS]: hosts,
+    [STORAGE_KEY_INITIALIZED]: true
+  });
 }
 
-function renderList(customHosts) {
+function renderList(hosts) {
   listEl.innerHTML = "";
 
-  for (const host of DEFAULT_HOSTS) {
-    const li = document.createElement("li");
-    const span = document.createElement("span");
-    span.textContent = host;
-    const tag = document.createElement("span");
-    tag.className = "muted";
-    tag.textContent = "default";
-    li.append(span, tag);
-    listEl.appendChild(li);
-  }
-
-  for (const host of customHosts) {
+  for (const host of hosts) {
     const li = document.createElement("li");
     const span = document.createElement("span");
     span.textContent = host;
@@ -64,12 +70,12 @@ function renderList(customHosts) {
     btn.type = "button";
     btn.textContent = "Remove";
     btn.addEventListener("click", async () => {
-      const next = customHosts.filter((item) => item !== host);
-      await saveCustomHosts(next);
+      const next = hosts.filter((item) => item !== host);
+      await saveConfiguredHosts(next);
       try {
         await chrome.permissions.remove({ origins: hostPatterns(host) });
       } catch {
-        // Ignore if already removed.
+        // Ignore if not an optional runtime origin permission.
       }
       setStatus(`Removed ${host}`);
       await refresh();
@@ -80,8 +86,8 @@ function renderList(customHosts) {
 }
 
 async function refresh() {
-  const customHosts = await getCustomHosts();
-  renderList(customHosts);
+  const hosts = await getConfiguredHosts();
+  renderList(hosts);
 }
 
 formEl.addEventListener("submit", async (event) => {
@@ -94,8 +100,8 @@ formEl.addEventListener("submit", async (event) => {
     return;
   }
 
-  const current = await getCustomHosts();
-  if (DEFAULT_HOSTS.includes(host) || current.includes(host)) {
+  const current = await getConfiguredHosts();
+  if (current.includes(host)) {
     setStatus(`${host} is already in the list`);
     return;
   }
@@ -107,7 +113,7 @@ formEl.addEventListener("submit", async (event) => {
   }
 
   const next = [...current, host];
-  await saveCustomHosts(next);
+  await saveConfiguredHosts(next);
   inputEl.value = "";
   setStatus(`Added ${host}`);
   await refresh();

@@ -1,15 +1,15 @@
 # AGENTS.md — Maintaining `ytm-keep-awake`
 
 ## Project Overview
-`ytm-keep-awake` is a lightweight **Manifest V3** Chrome extension designed for **ChromeOS / ChromeOS Flex** (tested on a Lenovo ThinkPad X1 Yoga Gen 5 in tablet and laptop modes). Its sole responsibility is to prevent display dimming and idle device sleep while **YouTube Music** (`music.youtube.com`), **YouTube** (`www.youtube.com`), or **user-configured sites** are open in a browser tab or a standalone PWA/app window (`type: "app"`), and to release the keep-awake hold as soon as all matching tabs/windows are closed.
+`ytm-keep-awake` is a lightweight **Manifest V3** Chrome extension designed for **ChromeOS / ChromeOS Flex** (tested on a Lenovo ThinkPad X1 Yoga Gen 5 in tablet and laptop modes). Its sole responsibility is to prevent display dimming and idle device sleep while configured sites (initially `music.youtube.com` and `www.youtube.com`, all removable) are open in a browser tab or a standalone PWA/app window (`type: "app"`), and to release the keep-awake hold as soon as all matching tabs/windows are closed.
 
 - **Target Runtime:** Chrome / ChromeOS Flex (Manifest V3 event-driven service worker)
-- **Permissions:** `"power"`, `"tabs"`, `"storage"` (plus `"optional_host_permissions"` for user-added sites)
+- **Permissions:** `"power"`, `"tabs"`, `"storage"`, `"scripting"` (plus `"optional_host_permissions"` for user-added sites)
 - **Core Files:**
   - `manifest.json` — Extension manifest (MV3, permissions, background service worker, embedded options UI, content script & web-accessible icon match patterns)
   - `background.js` — Service worker handling tab/window/storage/permission events, URL matching, serialized state evaluation, `chrome.power` transitions, and timestamped console logging
   - `content.js` — Content script rendering/removing the active squircle indicator badge in matching pages
-  - `options.html` / `options.js` — Minimal embedded options UI for adding/removing custom hostnames and requesting host permissions
+  - `options.html` / `options.js` — Minimal embedded options UI for adding/removing any configured hostname (including defaults)
 
 ## Core Architecture & Design Invariants
 Preserve these invariants when making edits:
@@ -18,8 +18,8 @@ Preserve these invariants when making edits:
    All `chrome.runtime.*`, `chrome.tabs.*`, `chrome.windows.*`, `chrome.storage.*`, and `chrome.permissions.*` event listeners—as well as the initial `scheduleEvaluation("service_worker_init")` call—must be registered synchronously at the top level of `background.js`. Do not defer listener registration inside async callbacks.
 2. **Serialized State Evaluations (`evaluationQueue`):**
    Tab, window, storage, and permission events frequently fire in bursts (for example, `windows.onCreated` followed by `tabs.onCreated` and multiple `tabs.onUpdated` events during PWA launch). Keep evaluations serialized through `evaluationQueue` so concurrent queries and state updates do not race.
-3. **Supported Hostname Matching (`music.youtube.com`, `www.youtube.com`, and Custom Hosts):**
-   Match `music.youtube.com`, `www.youtube.com`, and normalized user-configured hostnames (`http:` or `https:`) across all paths via `URL` parsing.
+3. **Supported Hostname Matching (Configured Hosts):**
+   Match normalized configured hostnames (`http:` or `https:`) stored in `chrome.storage.sync` (seeded once with `music.youtube.com` and `www.youtube.com`, with any site removable) across all paths via `URL` parsing.
 4. **Explicit Release & Idempotent Transitions:**
    - When `matchingTabs.length > 0`, request `"display"` keep-awake via `chrome.power.requestKeepAwake("display")` only if `currentWakeState !== "display"`.
    - When `matchingTabs.length === 0`, call `chrome.power.releaseKeepAwake()` and transition `currentWakeState` to `"released"` so sleep is never left stuck on.

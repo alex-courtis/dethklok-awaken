@@ -1,9 +1,10 @@
-const DEFAULT_HOSTNAMES = [
+const INITIAL_DEFAULT_HOSTNAMES = [
   "music.youtube.com",
   "www.youtube.com"
 ];
 
-const STORAGE_KEY_CUSTOM_HOSTS = "customHosts";
+const STORAGE_KEY_HOSTS = "configuredHosts";
+const STORAGE_KEY_INITIALIZED = "hostsInitialized";
 
 // "display" = active wake lock held by this extension; "released" = lock released/inactive.
 let currentWakeState = "released";
@@ -38,23 +39,32 @@ function normalizeHostname(input) {
   }
 }
 
-async function getConfiguredHostnames() {
-  const hosts = new Set(DEFAULT_HOSTNAMES);
-  try {
-    const stored = await chrome.storage.sync.get({ [STORAGE_KEY_CUSTOM_HOSTS]: [] });
-    const list = Array.isArray(stored[STORAGE_KEY_CUSTOM_HOSTS])
-      ? stored[STORAGE_KEY_CUSTOM_HOSTS]
+async function ensureHostsInitialized() {
+  const stored = await chrome.storage.sync.get({
+    [STORAGE_KEY_HOSTS]: [],
+    [STORAGE_KEY_INITIALIZED]: false
+  });
+  if (stored[STORAGE_KEY_INITIALIZED]) {
+    return Array.isArray(stored[STORAGE_KEY_HOSTS])
+      ? Array.from(new Set(stored[STORAGE_KEY_HOSTS].map(normalizeHostname).filter(Boolean)))
       : [];
-    for (const raw of list) {
-      const host = normalizeHostname(raw);
-      if (host) {
-        hosts.add(host);
-      }
-    }
-  } catch (err) {
-    logEvent("ERROR reading custom hosts from storage", String(err));
   }
-  return hosts;
+  const defaults = [...INITIAL_DEFAULT_HOSTNAMES];
+  await chrome.storage.sync.set({
+    [STORAGE_KEY_HOSTS]: defaults,
+    [STORAGE_KEY_INITIALIZED]: true
+  });
+  return defaults;
+}
+
+async function getConfiguredHostnames() {
+  try {
+    const list = await ensureHostsInitialized();
+    return new Set(list);
+  } catch (err) {
+    logEvent("ERROR reading configured hosts from storage", String(err));
+    return new Set(INITIAL_DEFAULT_HOSTNAMES);
+  }
 }
 
 function isSupportedUrl(rawUrl, allowedHosts) {
@@ -224,8 +234,8 @@ chrome.runtime.onStartup.addListener(() => {
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName === "sync" && changes[STORAGE_KEY_CUSTOM_HOSTS]) {
-    void scheduleEvaluation("storage.onChanged (customHosts)");
+  if (areaName === "sync" && changes[STORAGE_KEY_HOSTS]) {
+    void scheduleEvaluation("storage.onChanged (configuredHosts)");
   }
 });
 
